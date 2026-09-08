@@ -60,7 +60,7 @@ jobs:
           set -euo pipefail
           sdkmanager \
             'platform-tools' \
-            'platforms;android-37' \
+            'platforms;android-35' \
             'build-tools;35.0.0' \
             'ndk;25.2.9519653'
 
