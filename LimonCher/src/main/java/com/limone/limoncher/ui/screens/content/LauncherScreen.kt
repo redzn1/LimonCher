@@ -55,6 +55,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.foundation.Image
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.boundsInParent
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -116,7 +122,8 @@ fun LauncherScreen(
                 ContentMenu(
                     modifier = Modifier.weight(7f),
                     isVisible = isVisible,
-                    onHomePageEvent = onHomePageEvent
+                    onHomePageEvent = onHomePageEvent,
+                    onLaunchGame = onLaunchGame
                 )
             }
 
@@ -157,31 +164,107 @@ fun LauncherScreen(
 private fun ContentMenu(
     isVisible: Boolean,
     onHomePageEvent: (MarkdownBlock.Button.Event) -> Unit,
+    onLaunchGame: (Version?) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val yOffset by swapAnimateDpAsState(
-        targetValue = (-40).dp,
+        targetValue = (-18).dp,
         swapIn = isVisible
     )
 
     val homePageViewModel = LocalHomePageViewModel.current
     val pageState by homePageViewModel.pageState.collectAsStateWithLifecycle()
     val richTextStyle = defaultRichTextStyle()
+    val version by VersionsManager.currentVersion.collectAsStateWithLifecycle()
 
     LazyColumn(
         modifier = modifier
             .fillMaxSize()
             .offset { IntOffset(x = 0, y = yOffset.roundToPx()) },
-        contentPadding = PaddingValues(all = 12.dp)
+        contentPadding = PaddingValues(bottom = 24.dp)
     ) {
+        item(key = "limoncher_hero") {
+            Box(
+                modifier = Modifier.fillMaxWidth().height(420.dp)
+            ) {
+                Image(
+                    painter = painterResource(R.drawable.limoncher_hero),
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+
+                Box(
+                    modifier = Modifier.fillMaxSize().background(
+                        Brush.verticalGradient(
+                            listOf(
+                                Color.Transparent,
+                                Color(0xD9151413)
+                            )
+                        )
+                    )
+                )
+
+                Column(
+                    modifier = Modifier.align(Alignment.BottomStart).padding(24.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(
+                        text = "MINECRAFT: JAVA EDITION",
+                        color = Color.White,
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.ExtraBold
+                    )
+                    Text(
+                        text = version?.getVersionName()?.let { "Ready to play • $it" }
+                            ?: "Choose an installation to start playing",
+                        color = Color.White.copy(alpha = 0.92f),
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+
+                androidx.compose.material3.Button(
+                    modifier = Modifier.align(Alignment.BottomEnd).padding(24.dp),
+                    onClick = { onLaunchGame(version) },
+                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFF4C9B28),
+                        contentColor = Color.White
+                    ),
+                    shape = RectangleShape
+                ) {
+                    Text(
+                        text = if (version != null) "PLAY NOW" else "INSTALLATIONS",
+                        fontWeight = FontWeight.ExtraBold
+                    )
+                }
+            }
+        }
+
+        item(key = "limoncher_whats_new") {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text(
+                    text = "What's New",
+                    color = Color.White,
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = "0.5.6",
+                    color = Color(0xFF70B94A),
+                    style = MaterialTheme.typography.labelLarge
+                )
+            }
+        }
+
         when (val state = pageState) {
             is HomePageState.Blank -> {}
             is HomePageState.Loading -> {
                 item(key = "homepage_loading_box") {
                     Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(all = 24.dp),
+                        modifier = Modifier.fillMaxWidth().padding(24.dp),
                         contentAlignment = Alignment.Center
                     ) {
                         Column(
@@ -191,7 +274,7 @@ private fun ContentMenu(
                             LoadingIndicator()
                             Text(
                                 text = stringResource(R.string.settings_launcher_home_page_loading),
-                                style = MaterialTheme.typography.labelMedium,
+                                style = MaterialTheme.typography.labelMedium
                             )
                         }
                     }

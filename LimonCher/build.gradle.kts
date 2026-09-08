@@ -40,8 +40,27 @@ fun getKeyFromLocal(envKey: String, fileName: String? = null, default: String? =
 
 android {
     namespace = launcherPackageName
-    compileSdk = 35
+    compileSdk = 37
 
+
+
+    signingConfigs {
+        create("releaseBuild") {
+            val keystore = file("limoncher-release.jks")
+            val storePassword = getKeyFromLocal("STORE_PASSWORD", ".store_password.txt")
+            val keyPassword = getKeyFromLocal("KEY_PASSWORD", ".key_password.txt")
+            val keyAlias = getKeyFromLocal("KEY_ALIAS", ".key_alias.txt", "limoncher")
+
+            if (keystore.isFile && storePassword.isNotBlank() && keyPassword.isNotBlank()) {
+                storeFile = keystore
+                this.storePassword = storePassword
+                this.keyAlias = keyAlias
+                this.keyPassword = keyPassword
+            } else {
+                logger.warn("BUILD: release signing key not configured; release will use the default debug signing key.")
+            }
+        }
+    }
 
     defaultConfig {
         applicationId = launcherPackageName
@@ -50,17 +69,21 @@ android {
         versionCode = launcherVersionCode
         versionName = launcherVersionName
         manifestPlaceholders["launcher_name"] = launcherAPPName
-        buildConfigField("String", "LIMONCHER_BUILD", "\"038-AndroidVer-LimonCher\"")
+        buildConfigField("String", "LIMONCHER_BUILD", "\"056-AndroidVer-LimonCher\"")
     }
 
     buildTypes {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
-            // Deliberately use Android's generated debug keystore so GitHub Releases
-            // require no private keystore or GitHub Secrets. Create a production
-            // signing key later if Play Store/update continuity is required.
-            signingConfig = signingConfigs.getByName("debug")
+
+            val releaseSigning = signingConfigs.getByName("releaseBuild")
+            signingConfig = if (releaseSigning.storeFile != null) {
+                releaseSigning
+            } else {
+                signingConfigs.getByName("debug")
+            }
+
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

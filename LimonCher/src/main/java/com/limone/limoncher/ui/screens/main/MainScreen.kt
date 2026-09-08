@@ -161,83 +161,99 @@ fun MainScreen(
         backgroundColor().copy(alpha = launcherBackgroundOpacity)
     } else backgroundColor()
 
-    Surface(
-        modifier = Modifier.fillMaxSize(),
-        color = backgroundColor,
-        contentColor = onBackgroundColor()
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-        ) {
-            TopBar(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(40.dp),
-                mainScreenKey = mainScreenKey,
-                inLauncherScreen = inLauncherScreen,
-                taskRunning = tasks.isEmpty(),
-                isTasksExpanded = isTaskMenuExpanded,
-                contentColor = onBackgroundColor(),
-                onScreenBack = {
-                    screenBackStackModel.mainScreen.backStack.removeFirstOrNull()
-                },
-                toMainScreen = toMainScreen,
-                toSettingsScreen = {
+    val selectedTab = when (mainScreenKey) {
+        null, NormalNavKey.LauncherMain -> MinecraftTab.PLAY
+        NormalNavKey.VersionsManager -> MinecraftTab.INSTALLATIONS
+        NormalNavKey.Multiplayer -> MinecraftTab.REALMS
+        is NestedNavKey.Download -> MinecraftTab.MODS
+        is NormalNavKey.AccountManager -> MinecraftTab.SKINS
+        is NestedNavKey.Settings -> MinecraftTab.PLAY
+        is NestedNavKey.VersionSettings -> MinecraftTab.MODS
+        is NormalNavKey.WebScreen -> MinecraftTab.PATCH_NOTES
+        else -> MinecraftTab.PLAY
+    }
+
+    LimonCherChrome(
+        selectedTab = selectedTab,
+        onTabSelected = { tab ->
+            when (tab) {
+                MinecraftTab.PLAY -> toMainScreen()
+                MinecraftTab.INSTALLATIONS -> {
                     screenBackStackModel.mainScreen.removeAndNavigateTo(
                         removes = screenBackStackModel.clearBeforeNavKeys,
-                        screenKey = screenBackStackModel.settingsScreen
+                        screenKey = NormalNavKey.VersionsManager
                     )
-                },
-                toDownloadScreen = {
-                    screenBackStackModel.navigateToDownload()
-                },
-                toMultiplayerScreen = {
+                }
+                MinecraftTab.REALMS -> {
                     screenBackStackModel.mainScreen.removeAndNavigateTo(
                         removes = screenBackStackModel.clearBeforeNavKeys,
                         screenKey = NormalNavKey.Multiplayer
                     )
-                },
-                openFileManager = {
-                    eventViewModel.sendEvent(
-                        EventViewModel.Event.OpenFileManager(
-                            rootPath = PathManager.DIR_FILES_EXTERNAL.absolutePath
+                }
+                MinecraftTab.MODS -> {
+                    VersionsManager.currentVersion.value?.let { version ->
+                        screenBackStackModel.mainScreen.navigateTo(
+                            screenKey = NestedNavKey.VersionSettings(version),
+                            useClassEquality = true
+                        )
+                    } ?: screenBackStackModel.mainScreen.removeAndNavigateTo(
+                        removes = screenBackStackModel.clearBeforeNavKeys,
+                        screenKey = NormalNavKey.VersionsManager
+                    )
+                }
+                MinecraftTab.SKINS -> {
+                    screenBackStackModel.mainScreen.removeAndNavigateTo(
+                        removes = screenBackStackModel.clearBeforeNavKeys,
+                        screenKey = NormalNavKey.AccountManager()
+                    )
+                }
+                MinecraftTab.PATCH_NOTES -> {
+                    screenBackStackModel.mainScreen.removeAndNavigateTo(
+                        removes = screenBackStackModel.clearBeforeNavKeys,
+                        screenKey = NormalNavKey.WebScreen(
+                            "https://www.minecraft.net/en-us/articles"
                         )
                     )
-                },
-                changeExpandedState = {
-                    changeTasksExpandedState()
-                },
+                }
+            }
+        },
+        onHome = toMainScreen,
+        onSettings = {
+            screenBackStackModel.mainScreen.removeAndNavigateTo(
+                removes = screenBackStackModel.clearBeforeNavKeys,
+                screenKey = screenBackStackModel.settingsScreen
+            )
+        },
+        onAccounts = {
+            screenBackStackModel.mainScreen.navigateTo(
+                screenKey = NormalNavKey.AccountManager()
+            )
+        }
+    ) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            NavigationUI(
+                modifier = Modifier.fillMaxSize(),
+                screenBackStackModel = screenBackStackModel,
+                toMainScreen = toMainScreen,
+                eventViewModel = eventViewModel,
+                modpackImportViewModel = modpackImportViewModel,
+                submitError = submitError
             )
 
-            Box(
+            TaskMenu(
+                tasks = tasks,
+                isExpanded = isTaskMenuExpanded,
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f)
+                    .fillMaxHeight()
+                    .fillMaxWidth(0.3f)
+                    .align(Alignment.CenterStart)
+                    .padding(all = 6.dp)
             ) {
-                NavigationUI(
-                    modifier = Modifier.fillMaxSize(),
-                    screenBackStackModel = screenBackStackModel,
-                    toMainScreen = toMainScreen,
-                    eventViewModel = eventViewModel,
-                    modpackImportViewModel = modpackImportViewModel,
-                    submitError = submitError
-                )
-
-                TaskMenu(
-                    tasks = tasks,
-                    isExpanded = isTaskMenuExpanded,
-                    modifier = Modifier
-                        .fillMaxHeight()
-                        .fillMaxWidth(0.3f)
-                        .align(Alignment.CenterStart)
-                        .padding(all = 6.dp)
-                ) {
-                    changeTasksExpandedState()
-                }
+                changeTasksExpandedState()
             }
         }
     }
+
 }
 
 @Composable

@@ -57,6 +57,7 @@ fun UpgradeDialog(
     data: RemoteData,
     onDismissRequest: () -> Unit,
     onFilesClick: () -> Unit,
+    onInstallClick: () -> Unit,
     onIgnored: () -> Unit,
     onLinkClick: (String) -> Unit,
     onCloudDriveClick: (RemoteData.CloudDrive) -> Unit
@@ -160,6 +161,12 @@ fun UpgradeDialog(
                     }
 
                     Button(
+                        onClick = onInstallClick
+                    ) {
+                        Text(text = "Install update")
+                    }
+
+                    FilledTonalButton(
                         onClick = onFilesClick
                     ) {
                         Text(text = stringResource(R.string.upgrade_more))

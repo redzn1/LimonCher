@@ -723,16 +723,14 @@ private fun AccountsLayout(
                             .padding(vertical = 6.dp),
                         currentAccount = currentAccount,
                         account = account,
-                        enabled = !isOffline, //非正版状态下不允许选择任何状态
+                        enabled = true, // LimonCher supports local, Microsoft, and Yggdrasil accounts
                         onSelected = { AccountsManager.setCurrentAccount(it) },
                         openChangeSkinDialog = {
-                            if (!account.isAuthServerAccount()) {
-                                actions.onIntent(
-                                    AccountManageIntent.UpdateAccountSkinOp(
-                                        AccountSkinOperation.ChangeSkin(account)
-                                    )
+                            actions.onIntent(
+                                AccountManageIntent.UpdateAccountSkinOp(
+                                    AccountSkinOperation.ChangeSkin(account)
                                 )
-                            }
+                            )
                         },
                         onRefreshClick = {
                             actions.onIntent(
@@ -802,6 +800,11 @@ private fun AccountSkinOperation(
                 onSkinPicked = { uri ->
                     actions.onIntent(
                         AccountManageIntent.OnSkinPicked(uri)
+                    )
+                },
+                onCapePicked = { uri ->
+                    actions.onIntent(
+                        AccountManageIntent.OnCapePicked(account, uri)
                     )
                 },
                 onDismissRequest = {

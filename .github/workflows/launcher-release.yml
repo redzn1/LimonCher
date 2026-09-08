@@ -15,9 +15,9 @@ concurrency:
 
 env:
   MODULE: ":LimonCher"
-  VERSION_NAME: "0.3.8-AndroidVer"
-  VERSION_CODE: "38"
-  BUILD_NAME: "038-AndroidVer-LimonCher"
+  VERSION_NAME: "0.5.6-AndroidVer"
+  VERSION_CODE: "506"
+  BUILD_NAME: "056-AndroidVer-LimonCher"
   PACKAGE_NAME: "com.limone.limoncher"
   DEVELOPER: "Limone Production, RedzDev"
 
@@ -30,19 +30,14 @@ jobs:
       matrix:
         include:
           - arch: arm
-            abi: armeabi-v7a
             label: ARM
           - arch: arm64
-            abi: arm64-v8a
             label: ARM64
           - arch: x86
-            abi: x86
             label: x86
           - arch: x86_64
-            abi: x86_64
             label: x86_64
           - arch: all
-            abi: universal
             label: Universal
 
     steps:
@@ -65,15 +60,37 @@ jobs:
         shell: bash
         run: yes | sdkmanager --licenses >/dev/null 2>&1 || true
 
-      - name: Install Android SDK 35 and NDK
+      - name: Install Android SDK and NDK
         shell: bash
         run: |
           set -euo pipefail
           sdkmanager \
             "platform-tools" \
-            "platforms;android-35" \
+            "platforms;android-37" \
             "build-tools;35.0.0" \
             "ndk;25.2.9519653"
+
+      - name: Configure release signing
+        shell: bash
+        env:
+          KEYSTORE_B64: ${{ secrets.LIMONCHER_KEYSTORE_B64 }}
+          STORE_PASSWORD: ${{ secrets.LIMONCHER_STORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.LIMONCHER_KEY_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.LIMONCHER_KEY_ALIAS }}
+        run: |
+          set -euo pipefail
+          if [[ -n "${KEYSTORE_B64:-}" && -n "${STORE_PASSWORD:-}" && -n "${KEY_PASSWORD:-}" ]]; then
+            printf '%s' "$KEYSTORE_B64" | base64 --decode > LimonCher/limoncher-release.jks
+            printf '%s' "$STORE_PASSWORD" > LimonCher/.store_password.txt
+            printf '%s' "$KEY_PASSWORD" > LimonCher/.key_password.txt
+            printf '%s' "${KEY_ALIAS:-limoncher}" > LimonCher/.key_alias.txt
+            keytool -list \
+              -keystore LimonCher/limoncher-release.jks \
+              -storepass "$STORE_PASSWORD" \
+              -alias "${KEY_ALIAS:-limoncher}" >/dev/null
+          else
+            echo "::warning::No release signing secrets. This run will use the runner's debug signing key; do not use it for upgrade-compatible production distribution."
+          fi
 
       - name: Make Gradle executable
         run: chmod +x ./gradlew
@@ -86,7 +103,7 @@ jobs:
             --no-daemon \
             --max-workers=2
 
-      - name: Verify APKs
+      - name: Verify APK
         shell: bash
         run: |
           set -euo pipefail
@@ -94,18 +111,16 @@ jobs:
           apks=(LimonCher/build/outputs/apk/release/*.apk)
           test "${#apks[@]}" -gt 0
           for apk in "${apks[@]}"; do
-            echo "APK: $apk"
             ls -lh "$apk"
           done
 
-      - name: Collect release APK
+      - name: Collect APK
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p release-assets
           shopt -s nullglob
           apks=(LimonCher/build/outputs/apk/release/*.apk)
-          test "${#apks[@]}" -gt 0
           for apk in "${apks[@]}"; do
             cp "$apk" "release-assets/LimonCher-${VERSION_NAME}-${{ matrix.arch }}.apk"
           done
@@ -125,7 +140,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Determine release tag and number
+      - name: Determine release tag
         id: release
         shell: bash
         run: |
@@ -133,13 +148,11 @@ jobs:
           if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
             RELEASE_TAG="${GITHUB_REF_NAME}"
           else
-            RELEASE_TAG="v${VERSION_NAME}-r${GITHUB_RUN_NUMBER}"
+            RELEASE_TAG="v${VERSION_NAME}"
           fi
+          echo "tag=${RELEASE_TAG}" >> "$GITHUB_OUTPUT"
 
-          echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
-          echo "release_number=$GITHUB_RUN_NUMBER" >> "$GITHUB_OUTPUT"
-
-      - name: Download all matrix APKs
+      - name: Download all APK artifacts
         uses: actions/download-artifact@v4
         with:
           pattern: LimonCher-*-${{ env.VERSION_NAME }}
@@ -150,9 +163,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          ls -lah release-assets
           count=$(find release-assets -maxdepth 1 -type f -name '*.apk' | wc -l)
           test "$count" -eq 5
+          ls -lah release-assets
 
       - name: Generate release description
         shell: bash
@@ -160,18 +173,17 @@ jobs:
           cat > release-body.md <<EOF
           # LimonCher ${VERSION_NAME}
 
-          Modern, lightweight Minecraft Java Launcher for Android.
+          Minecraft: Java Edition focused launcher for Android.
 
-          ## Application
+          ## Release Information
 
           - Developer: ${DEVELOPER}
           - Package: \`${PACKAGE_NAME}\`
           - Version: ${VERSION_NAME}
           - Version Code: ${VERSION_CODE}
           - Build: ${BUILD_NAME}
-          - Release: #${GITHUB_RUN_NUMBER}
 
-          ## Architectures
+          ## Downloads
 
           - ARM — \`armeabi-v7a\`
           - ARM64 — \`arm64-v8a\`
@@ -179,20 +191,29 @@ jobs:
           - x86_64 — \`x86_64\`
           - Universal — all supported ABIs
 
-          ## Authentication
+          ## Features
 
-          Microsoft, Ely.by/Yggdrasil-compatible accounts, and offline profiles supported by the launcher.
+          - Minecraft Java Edition focused UI
+          - Play / Installations / Realms / Mods / Skins / Patch Notes navigation
+          - Microsoft, Ely.by/Yggdrasil-compatible and Offline accounts
+          - Minecraft capes for supported online accounts
+          - Local PNG cape import for custom/offline profiles
+          - In-app launcher update flow
+          - Performance and stability improvements
 
-          ## Build
+          ## Update
 
-          Built automatically by GitHub Actions.
+          Android can install a newer APK over an existing installation without uninstalling
+          when the application ID, signing key, and version code are compatible.
+
+          Built automatically from commit \`${GITHUB_SHA}\`.
           EOF
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.release.outputs.tag }}
-          name: "LimonCher ${VERSION_NAME} • Release #${{ steps.release.outputs.release_number }}"
+          name: "LimonCher ${{ env.VERSION_NAME }}"
           body_path: release-body.md
           generate_release_notes: true
           fail_on_unmatched_files: true

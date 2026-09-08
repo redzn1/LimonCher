@@ -20,7 +20,9 @@ package com.limone.limoncher.ui.activities
 
 import android.annotation.SuppressLint
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.provider.Settings
 import android.os.Build
 import android.os.Bundle
 import android.view.KeyEvent
@@ -79,6 +81,7 @@ import com.limone.limoncher.ui.theme.showThemed
 import com.limone.limoncher.ui.toAndroidString
 import com.limone.limoncher.ui.vulkan_checker.VCOperation
 import com.limone.limoncher.ui.vulkan_checker.VulkanChecker
+import com.limone.limoncher.upgrade.RemoteData
 import com.limone.limoncher.upgrade.TooFrequentOperationException
 import com.limone.limoncher.utils.compareLangTag
 import com.limone.limoncher.utils.copyText
@@ -111,6 +114,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.FileOutputStream
+import java.net.HttpURLConnection
+import java.net.URL
 import java.util.Locale
 
 private const val TAG = "MainActivity"
@@ -505,7 +511,8 @@ class MainActivity : BaseAppCompatActivity() {
                     onIgnoredClick = { ver ->
                         AllSettings.lastIgnoredVersion.save(ver)
                     },
-                    onLinkClick = { eventViewModel.sendEvent(EventViewModel.Event.OpenLink(it)) }
+                    onLinkClick = { eventViewModel.sendEvent(EventViewModel.Event.OpenLink(it)) },
+                    onApkSelected = { file -> installLauncherUpdate(file) }
                 )
 
                 val vcOperation by vulkanCheckerViewModel.vcOperation.collectAsStateWithLifecycle()
@@ -563,6 +570,77 @@ class MainActivity : BaseAppCompatActivity() {
         withContext(Dispatchers.Main) {
             val (result, useTurnip) = vulkanCheckerViewModel.check(version)
             vulkanCheckerViewModel.changeOperation(VCOperation.Result(result, useTurnip))
+        }
+    }
+
+    /**
+     * Download the selected release APK into the launcher cache and invoke the
+     * Android package installer. The existing app is updated in place when its
+     * application ID and signing certificate match the release.
+     */
+    private fun installLauncherUpdate(file: RemoteData.RemoteFile) {
+        lifecycleScope.launch(Dispatchers.IO) {
+            runCatching {
+                val target = File(PathManager.DIR_CACHE, "LimonCher-update.apk")
+                val connection = (URL(file.uri).openConnection() as HttpURLConnection).apply {
+                    requestMethod = "GET"
+                    connectTimeout = 20_000
+                    readTimeout = 60_000
+                    setRequestProperty("User-Agent", "LimonCher/${com.limone.limoncher.BuildConfig.VERSION_NAME}")
+                    instanceFollowRedirects = true
+                }
+                connection.connect()
+                if (connection.responseCode !in 200..299) {
+                    throw IllegalStateException("HTTP ${connection.responseCode}")
+                }
+                connection.inputStream.use { input ->
+                    FileOutputStream(target).use { output ->
+                        input.copyTo(output, bufferSize = 256 * 1024)
+                    }
+                }
+                connection.disconnect()
+
+                withContext(Dispatchers.Main) {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+                        !packageManager.canRequestPackageInstalls()
+                    ) {
+                        Toast.makeText(
+                            this@MainActivity,
+                            "Allow LimonCher to install updates, then retry.",
+                            Toast.LENGTH_LONG
+                        ).show()
+                        startActivity(
+                            Intent(
+                                Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                                Uri.parse("package:$packageName")
+                            )
+                        )
+                        return@withContext
+                    }
+
+                    val authority = "$packageName.provider"
+                    val apkUri = androidx.core.content.FileProvider.getUriForFile(
+                        this@MainActivity,
+                        authority,
+                        target
+                    )
+                    val installerIntent = Intent(Intent.ACTION_VIEW).apply {
+                        setDataAndType(apkUri, "application/vnd.android.package-archive")
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    }
+                    startActivity(installerIntent)
+                }
+            }.onFailure { e ->
+                Logger.error(TAG, "Failed to download/install launcher update", e)
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(
+                        this@MainActivity,
+                        "Failed to prepare the update: ${e.message}",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+            }
         }
     }
 

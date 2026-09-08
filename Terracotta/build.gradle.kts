@@ -5,7 +5,7 @@ plugins {
 android {
     namespace = "net.burningtnt.terracotta"
     compileSdk {
-        version = release(35)
+        version = release(37)
     }
 
     defaultConfig {

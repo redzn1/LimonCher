@@ -19,6 +19,7 @@
 package com.limone.limoncher.viewmodel
 
 import android.content.Context
+import android.graphics.BitmapFactory
 import android.net.Uri
 import android.widget.Toast
 import androidx.lifecycle.ViewModel
@@ -33,6 +34,7 @@ import com.limone.limoncher.game.account.accountErrorText
 import com.limone.limoncher.game.account.addOtherServer
 import com.limone.limoncher.game.account.auth_server.AuthServerHelper
 import com.limone.limoncher.game.account.auth_server.data.AuthServer
+import com.limone.limoncher.game.account.isAuthServerAccount
 import com.limone.limoncher.game.account.isLocalAccount
 import com.limone.limoncher.game.account.isMicrosoftAccount
 import com.limone.limoncher.game.account.isReloginRequired
@@ -109,6 +111,7 @@ sealed interface AccountManageIntent {
     data class UpdatePendingCapeData(val capeState: ChangeCape) :
         AccountManageIntent
     data class OnSkinPicked(val uri: Uri) : AccountManageIntent
+    data class OnCapePicked(val account: Account, val uri: Uri) : AccountManageIntent
     data object ResetAccountSkinDialogState : AccountManageIntent
 
 
@@ -344,6 +347,7 @@ class AccountManageViewModel @AssistedInject constructor(
             }
 
             is AccountManageIntent.OnSkinPicked -> onSkinPicked(intent)
+            is AccountManageIntent.OnCapePicked -> onCapePicked(intent)
             is AccountManageIntent.ResetAccountSkinDialogState -> {
                 _accountSkinDialogState.update { AccountSkinDialogState() }
             }
@@ -353,7 +357,7 @@ class AccountManageViewModel @AssistedInject constructor(
                 applySkin(intent.account, intent.file, intent.model)
 
             is AccountManageIntent.UploadMicrosoftSkin -> uploadMicrosoftSkin(intent)
-            is AccountManageIntent.FetchMicrosoftCapes -> fetchMicrosoftCapes(intent.account)
+            is AccountManageIntent.FetchMicrosoftCapes -> fetchAccountCapes(intent.account)
             is AccountManageIntent.ApplyMicrosoftCape -> applyMicrosoftCape(intent)
             is AccountManageIntent.CreateLocalAccount -> createLocalAccount(
                 intent.userName,
@@ -418,6 +422,49 @@ class AccountManageViewModel @AssistedInject constructor(
 
             _accountSkinDialogState.update {
                 it.copy(importingSkin = false)
+            }
+        }
+    }
+
+    /** Import a local cape so it can also be used by offline/Yggdrasil accounts. */
+    private fun onCapePicked(intent: AccountManageIntent.OnCapePicked) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val target = intent.account.getCapeFile()
+            val temp = File(PathManager.DIR_CACHE, "cape_pick_${UUID.randomUUID()}.png")
+            runCatching {
+                context.copyLocalFile(intent.uri, temp)
+                val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                temp.inputStream().use { BitmapFactory.decodeStream(it, null, bounds) }
+                if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
+                    throw IllegalArgumentException("Invalid cape image")
+                }
+                if (bounds.outWidth > 2048 || bounds.outHeight > 2048) {
+                    throw IllegalArgumentException("Cape image is too large")
+                }
+                FileUtils.deleteQuietly(target)
+                FileUtils.moveFile(temp, target)
+
+                val localCape = PlayerProfile.Cape(
+                    id = intent.account.uniqueUUID,
+                    state = "ACTIVE",
+                    alias = "Local Cape",
+                    url = ""
+                )
+                _accountCapeOpMap.update { current ->
+                    current + (intent.account.uniqueUUID to listOf(localCape))
+                }
+                _accountSkinDialogState.update {
+                    it.copy(pendingCapeData = ChangeCape.ChangeCapeData(localCape))
+                }
+                _accountSkinDialogState.update {
+                    it.copy(pendingCapeData = ChangeCape.ChangeCapeData(localCape))
+                }
+            }.onFailure { e ->
+                FileUtils.deleteQuietly(temp)
+                emitError(
+                    androidText(R.string.account_change_cape_apply_failed_generic),
+                    androidText(e.message ?: "Failed to import cape")
+                )
             }
         }
     }
@@ -508,8 +555,12 @@ class AccountManageViewModel @AssistedInject constructor(
                         task.updateMessage(androidText(R.string.account_change_skin_uploading))
                         uploadSkin(MINECRAFT_SERVICES_URL, account.accessToken, skinFile, skinModel)
                     }, onRefreshRequest = {
-                        account.refreshMicrosoft(task = task, coroutineContext = coroutineContext)
-                        AccountsManager.suspendSaveAccount(account)
+                        if (account.isMicrosoftAccount()) {
+                            account.refreshMicrosoft(task = task, coroutineContext = coroutineContext)
+                            AccountsManager.suspendSaveAccount(account)
+                        } else {
+                            throw IllegalStateException("Yggdrasil account authorization expired")
+                        }
                     })
 
                     task.updateMessage(androidText(R.string.account_change_skin_update_local))
@@ -558,7 +609,7 @@ class AccountManageViewModel @AssistedInject constructor(
     }
 
     /** 获取微软披风列表 */
-    private fun fetchMicrosoftCapes(account: Account) {
+    private fun fetchAccountCapes(account: Account) {
         TaskSystem.submitTask(
             Task.runTask(
                 id = account.uniqueUUID,
@@ -567,16 +618,24 @@ class AccountManageViewModel @AssistedInject constructor(
                     executeWithAuthorization(block = {
                         task.updateProgress(-1f)
                         task.updateMessage(androidText(R.string.account_change_cape_fetch_all))
-                        val profile = getPlayerProfile(MINECRAFT_SERVICES_URL, account.accessToken)
+                        val apiUrl = when {
+                            account.isMicrosoftAccount() -> MINECRAFT_SERVICES_URL
+                            account.isAuthServerAccount() -> account.otherBaseUrl!!.removeSuffix("/") + "/sessionserver"
+                            else -> null
+                        } ?: return@executeWithAuthorization
+                        val profile = getPlayerProfile(apiUrl, account.accessToken)
                         task.updateProgress(-1f)
                         task.updateMessage(androidText(R.string.account_change_cape_cache_all))
                         cacheAllCapes(profile)
-                        //同时更新本地的皮肤/披风
                         account.downloadYggdrasil()
                         _accountCapeOpMap.update { it + (account.uniqueUUID to profile.capes) }
                     }, onRefreshRequest = {
-                        account.refreshMicrosoft(task = task, coroutineContext = coroutineContext)
-                        AccountsManager.suspendSaveAccount(account)
+                        if (account.isMicrosoftAccount()) {
+                            account.refreshMicrosoft(task = task, coroutineContext = coroutineContext)
+                            AccountsManager.suspendSaveAccount(account)
+                        } else {
+                            throw IllegalStateException("Yggdrasil account authorization expired")
+                        }
                     })
                 },
                 onError = { th ->
@@ -611,14 +670,21 @@ class AccountManageViewModel @AssistedInject constructor(
                 task = { task ->
                     executeWithAuthorization(block = {
                         task.updateMessage(androidText(R.string.account_change_cape_apply))
-                        changeCape(
-                            MINECRAFT_SERVICES_URL,
-                            account.accessToken,
-                            capeId
-                        )
+                        val apiUrl = when {
+                            account.isMicrosoftAccount() -> MINECRAFT_SERVICES_URL
+                            account.isAuthServerAccount() -> account.otherBaseUrl!!.removeSuffix("/") + "/sessionserver"
+                            else -> null
+                        }
+                        if (apiUrl != null) {
+                            changeCape(apiUrl, account.accessToken, capeId)
+                        }
                     }, onRefreshRequest = {
-                        account.refreshMicrosoft(task = task, coroutineContext = coroutineContext)
-                        AccountsManager.suspendSaveAccount(account)
+                        if (account.isMicrosoftAccount()) {
+                            account.refreshMicrosoft(task = task, coroutineContext = coroutineContext)
+                            AccountsManager.suspendSaveAccount(account)
+                        } else {
+                            throw IllegalStateException("Yggdrasil account authorization expired")
+                        }
                     })
 
                     val capeFile = cape.getFile(PathManager.DIR_ACCOUNT_CAPE)

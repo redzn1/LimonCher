@@ -6,9 +6,9 @@ LimonCher is the Android Minecraft Java launcher derived from the supplied launc
 
 - Application: LimonCher
 - Package: `com.limone.limoncher`
-- Version: `0.3.8-AndroidVer`
+- Version: `0.5.2-AndroidVer`
 - Version code: `24`
-- Build label: `038-AndroidVer-LimonCher`
+- Build label: `052-AndroidVer-LimonCher`
 - Developer: Limone Production X RedzDev
 
 ## Authentication

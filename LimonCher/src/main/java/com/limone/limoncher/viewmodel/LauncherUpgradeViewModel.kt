@@ -43,6 +43,7 @@ import com.limone.limoncher.R
 import com.limone.limoncher.path.GLOBAL_CLIENT
 import com.limone.limoncher.path.GLOBAL_JSON
 import com.limone.limoncher.path.URL_PROJECT_INFO
+import com.limone.limoncher.path.URL_PROJECT
 import com.limone.limoncher.setting.AllSettings
 import com.limone.limoncher.ui.components.MarqueeText
 import com.limone.limoncher.ui.components.SimpleListDialog
@@ -50,9 +51,11 @@ import com.limone.limoncher.ui.screens.content.elements.DisabledAlpha
 import com.limone.limoncher.ui.upgrade.UpgradeDialog
 import com.limone.limoncher.ui.upgrade.UpgradeFilesDialog
 import com.limone.limoncher.upgrade.GithubContentApi
+import com.limone.limoncher.upgrade.GithubRelease
 import com.limone.limoncher.upgrade.RemoteData
 import com.limone.limoncher.upgrade.TooFrequentOperationException
 import com.limone.limoncher.utils.logging.Logger
+import com.limone.limoncher.utils.device.Architecture
 import com.limone.limoncher.utils.network.safeBodyAsJson
 import com.limone.limoncher.utils.network.withRetry
 import com.limone.limoncher.utils.string.decodeBase64
@@ -81,7 +84,7 @@ sealed interface LauncherUpgradeOperation {
  * 最新版本的信息获取源
  */
 private const val LATEST_VERSION = "latest_version_md.json"
-private const val LATEST_API_URL = "$URL_PROJECT_INFO/$LATEST_VERSION"
+private const val LATEST_API_URL = "$URL_PROJECT_INFO/releases/latest"
 private const val LATEST_API_CHINESE_URL = "https://repo.miawa.cn/zalith-info/v2/$LATEST_VERSION"
 
 /**
@@ -193,30 +196,56 @@ class LauncherUpgradeViewModel: ViewModel() {
         return withContext(Dispatchers.IO) {
             runCatching {
                 withRetry(logTag = "LauncherUpgrade", maxRetries = 2) {
-                    //获取最新的启动器信息
-                    val api = GLOBAL_CLIENT.get(LATEST_API_URL).safeBodyAsJson<GithubContentApi>()
-                    //需要Base64解密
-                    val contentString = decodeBase64(api.content)
-                    GLOBAL_JSON.decodeFromString(RemoteData.serializer(), contentString)
+                    val release = GLOBAL_CLIENT
+                        .get(LATEST_API_URL)
+                        .safeBodyAsJson<GithubRelease>()
+
+                    val files = release.assets.mapNotNull { asset ->
+                        val lower = asset.name.lowercase(Locale.ROOT)
+                        if (!lower.endsWith(".apk")) return@mapNotNull null
+                        val arch = when {
+                            lower.contains("-arm64.apk") || lower.contains("arm64-v8a") -> RemoteData.RemoteFile.Arch.ARM64
+                            lower.contains("-arm.apk") || lower.contains("armeabi-v7a") -> RemoteData.RemoteFile.Arch.ARM
+                            lower.contains("-x86_64.apk") -> RemoteData.RemoteFile.Arch.X86_64
+                            lower.contains("-x86.apk") -> RemoteData.RemoteFile.Arch.X86
+                            lower.contains("-all.apk") || lower.contains("universal") -> RemoteData.RemoteFile.Arch.ALL
+                            else -> return@mapNotNull null
+                        }
+                        RemoteData.RemoteFile(asset.name, asset.browserDownloadUrl, arch, asset.size)
+                    }
+
+                    if (files.isEmpty()) return@withRetry null
+
+                    val body = RemoteData.RemoteBody(
+                        language = "en_US",
+                        markdown = release.body.orEmpty().ifBlank {
+                            release.name.orEmpty().ifBlank { "LimonCher update available." }
+                        }
+                    )
+
+                    RemoteData(
+                        code = parseReleaseCode(release.tagName),
+                        version = release.tagName.removePrefix("v"),
+                        createdAt = release.publishedAt ?: "1970-01-01T00:00:00Z",
+                        files = files,
+                        defaultBody = body,
+                        bodies = listOf(body)
+                    )
                 }
             }.getOrElse { e ->
-                if (Locale.getDefault().language == "zh") {
-                    runCatching {
-                        Logger.info(TAG, "Check for updates in the Chinese region.")
-                        //在中国地区，可能因为无法访问 Github API 导致获取更新信息失败
-                        withRetry(logTag = "LauncherUpgrade_Chinese", maxRetries = 2) {
-                            GLOBAL_CLIENT.get(LATEST_API_CHINESE_URL).safeBodyAsJson<RemoteData>()
-                        }
-                    }.getOrElse { e ->
-                        Logger.warning(TAG, "Failed to check for launcher upgrade!", e)
-                        null
-                    }
-                } else {
-                    Logger.warning(TAG, "Failed to check for launcher upgrade!", e)
-                    null
-                }
+                Logger.warning(TAG, "Failed to check GitHub release updates", e)
+                null
             }
         }
+    }
+
+    private fun parseReleaseCode(tag: String): Int {
+        val clean = tag.removePrefix("v")
+        return Regex("^(\d+)\.(\d+)\.(\d+)").find(clean)?.let { m ->
+            m.groupValues[1].toInt() * 10_000 +
+                m.groupValues[2].toInt() * 100 +
+                m.groupValues[3].toInt()
+        } ?: 0
     }
 
     /**
@@ -259,7 +288,8 @@ fun LauncherUpgradeOperation(
     operation: LauncherUpgradeOperation,
     onChanged: (LauncherUpgradeOperation) -> Unit,
     onIgnoredClick: (code: Int) -> Unit,
-    onLinkClick: (String) -> Unit
+    onLinkClick: (String) -> Unit,
+    onApkSelected: (RemoteData.RemoteFile) -> Unit
 ) {
     when (operation) {
         is LauncherUpgradeOperation.None -> {}
@@ -271,6 +301,19 @@ fun LauncherUpgradeOperation(
                 },
                 onFilesClick = {
                     onChanged(LauncherUpgradeOperation.SelectApk(operation.data))
+                },
+                onInstallClick = {
+                    val arch = when (Architecture.getDeviceArchitecture()) {
+                        Architecture.ARCH_ARM -> RemoteData.RemoteFile.Arch.ARM
+                        Architecture.ARCH_ARM64 -> RemoteData.RemoteFile.Arch.ARM64
+                        Architecture.ARCH_X86 -> RemoteData.RemoteFile.Arch.X86
+                        Architecture.ARCH_X86_64 -> RemoteData.RemoteFile.Arch.X86_64
+                        else -> RemoteData.RemoteFile.Arch.ALL
+                    }
+                    val file = operation.data.files.find { it.arch == arch }
+                        ?: operation.data.files.find { it.arch == RemoteData.RemoteFile.Arch.ALL }
+                        ?: operation.data.files.firstOrNull()
+                    file?.let(onApkSelected)
                 },
                 onIgnored = {
                     onIgnoredClick(operation.data.code)
@@ -288,7 +331,7 @@ fun LauncherUpgradeOperation(
                     onChanged(LauncherUpgradeOperation.None)
                 },
                 onFileSelected = { file ->
-                    onLinkClick(file.uri)
+                    onApkSelected(file)
                     onChanged(LauncherUpgradeOperation.None)
                 }
             )

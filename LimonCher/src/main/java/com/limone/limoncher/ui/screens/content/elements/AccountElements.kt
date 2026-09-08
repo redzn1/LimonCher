@@ -1336,6 +1336,7 @@ fun ChangeSkinDialog(
     onCapeStateChange: (ChangeCape) -> Unit,
     isImportingSkin: Boolean,
     onSkinPicked: (Uri) -> Unit,
+    onCapePicked: (Uri) -> Unit,
     onDismissRequest: () -> Unit,
     onResetSkin: () -> Unit,
     onApplySkin: (File, SkinModelType) -> Unit,
@@ -1357,9 +1358,19 @@ fun ChangeSkinDialog(
 
     var currentCapeToLoad by remember { mutableStateOf(EmptyCape) }
     var currentUsingCape by remember { mutableStateOf(EmptyCape) }
+    val localCape = remember(account) {
+        if (account.getCapeFile().exists()) {
+            PlayerProfile.Cape(
+                id = account.uniqueUUID,
+                state = "ACTIVE",
+                alias = "Local Cape",
+                url = ""
+            )
+        } else null
+    }
 
-    LaunchedEffect(availableCapes) {
-        if (account.isMicrosoftAccount()) {
+    LaunchedEffect(availableCapes, localCape) {
+        if (account.isMicrosoftAccount() || account.isAuthServerAccount()) {
             if (availableCapes.isNotEmpty()) {
                 isFetchingCapes = false
                 val currentUsingCape0 = availableCapes.findUsing() ?: EmptyCape
@@ -1369,12 +1380,20 @@ fun ChangeSkinDialog(
                 isFetchingCapes = true
                 onFetchCapes()
             }
+        } else if (localCape != null) {
+            currentUsingCape = localCape
+            currentCapeToLoad = localCape
         }
     }
 
     val skinPicker =
         rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
             uri?.let(onSkinPicked)
+        }
+
+    val capePicker =
+        rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+            uri?.let(onCapePicked)
         }
 
     /**
@@ -1473,7 +1492,7 @@ fun ChangeSkinDialog(
 
                                             is ChangeSkin.ResetSkin -> resetSkin()
                                         }
-                                        if (account.isMicrosoftAccount()) {
+                                        if (account.isMicrosoftAccount() || account.isAuthServerAccount() || localCape != null) {
                                             playerSkin.loadCape(currentCapeToLoad)
                                         }
                                     }
@@ -1559,8 +1578,8 @@ fun ChangeSkinDialog(
                                 }
                             }
 
-                            //仅微软账号支持更改披风
-                            if (account.isMicrosoftAccount()) {
+                            //Online Yggdrasil accounts can manage their server-provided capes
+                            if (account.isMicrosoftAccount() || account.isAuthServerAccount() || localCape != null) {
                                 InfoLayoutTextItem(
                                     modifier = Modifier.fillMaxWidth(),
                                     title = if (isFetchingCapes) {
@@ -1588,6 +1607,19 @@ fun ChangeSkinDialog(
                                     enabled = !isFetchingCapes
                                 )
                             }
+
+                            InfoLayoutTextItem(
+                                modifier = Modifier.fillMaxWidth(),
+                                title = "Import Local Cape",
+                                icon = {
+                                    Icon(
+                                        modifier = Modifier.size(22.dp),
+                                        painter = painterResource(R.drawable.ic_upload),
+                                        contentDescription = null
+                                    )
+                                },
+                                onClick = { capePicker.launch(arrayOf("image/png")) }
+                            )
 
                             //离线账号重置皮肤
                             if (account.isLocalAccount() && account.hasSkinFile && skinState != ChangeSkin.ResetSkin) {
@@ -1663,6 +1695,7 @@ fun ChangeSkinDialog(
             capes = buildList {
                 add(EmptyCape)
                 addAll(availableCapes)
+                localCape?.takeIf { availableCapes.none { cape -> cape.id == it.id } }?.let(::add)
             },
             selectedCape = cape,
             onSelected = { cape ->

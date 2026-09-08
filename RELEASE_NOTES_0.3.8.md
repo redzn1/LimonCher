@@ -1,4 +1,4 @@
-# LimonCher 0.3.8-AndroidVer
+# LimonCher 0.5.2-AndroidVer
 
 ## Release 0.3.8
 
@@ -12,4 +12,4 @@
 Developer: Limone Production, RedzDev
 Package: `com.limone.limoncher`
 Version Code: `38`
-Build: `038-AndroidVer-LimonCher`
+Build: `052-AndroidVer-LimonCher`
