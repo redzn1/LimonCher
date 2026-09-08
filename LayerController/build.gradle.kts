@@ -8,7 +8,7 @@ plugins {
 
 android {
     namespace = "com.movtery.layer_controller"
-    compileSdk = 35
+    compileSdk = 37
 
     defaultConfig {
         minSdk = 26
