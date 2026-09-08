@@ -37,7 +37,3 @@ LimonCher/limoncher-release.jks
 LimonCher/.store_password.txt
 LimonCher/.key_password.txt
 LimonCher/.key_alias.txt
-*.jks
-*.keystore
-.store_password.txt
-.key_password.txt

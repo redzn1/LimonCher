@@ -15,11 +15,11 @@ concurrency:
 
 env:
   MODULE: ":LimonCher"
-  VERSION_NAME: "0.2.4-AndroidVer"
-  VERSION_CODE: "24"
-  BUILD_NAME: "024-AndroidVer-LimonCher"
+  VERSION_NAME: "0.3.8-AndroidVer"
+  VERSION_CODE: "38"
+  BUILD_NAME: "038-AndroidVer-LimonCher"
   PACKAGE_NAME: "com.limone.limoncher"
-  DEVELOPER: "Limone Production X IsraaDev"
+  DEVELOPER: "Limone Production, RedzDev"
 
 jobs:
   build:
@@ -65,44 +65,28 @@ jobs:
         shell: bash
         run: yes | sdkmanager --licenses >/dev/null 2>&1 || true
 
-      - name: Install Android SDK and NDK
+      - name: Install Android SDK 35 and NDK
         shell: bash
-        run: |
-          sdkmanager \
-            "platform-tools" \
-            "platforms;android-37" \
-            "build-tools;35.0.0" \
-            "ndk;25.2.9519653"
-
-      - name: Prepare stable release signing
-        shell: bash
-        env:
-          KEYSTORE_B64: ${{ secrets.LIMONCHER_KEYSTORE_B64 }}
-          STORE_PASSWORD: ${{ secrets.LIMONCHER_STORE_PASSWORD }}
-          KEY_PASSWORD: ${{ secrets.LIMONCHER_KEY_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.LIMONCHER_KEY_ALIAS }}
         run: |
           set -euo pipefail
-          : "${KEYSTORE_B64:?Missing LIMONCHER_KEYSTORE_B64}"
-          : "${STORE_PASSWORD:?Missing LIMONCHER_STORE_PASSWORD}"
-          : "${KEY_PASSWORD:?Missing LIMONCHER_KEY_PASSWORD}"
-          : "${KEY_ALIAS:?Missing LIMONCHER_KEY_ALIAS}"
-          printf '%s' "$KEYSTORE_B64" | base64 --decode > LimonCher/limoncher-release.jks
-          test -s LimonCher/limoncher-release.jks
-          keytool -list -keystore LimonCher/limoncher-release.jks -storepass "$STORE_PASSWORD" -alias "$KEY_ALIAS" >/dev/null
-          {
-            echo "STORE_PASSWORD=$STORE_PASSWORD"
-            echo "KEY_PASSWORD=$KEY_PASSWORD"
-            echo "KEY_ALIAS=$KEY_ALIAS"
-          } >> "$GITHUB_ENV"
+          sdkmanager \
+            "platform-tools" \
+            "platforms;android-35" \
+            "build-tools;35.0.0" \
+            "ndk;25.2.9519653"
 
       - name: Make Gradle executable
         run: chmod +x ./gradlew
 
-      - name: Build signed release
-        run: ./gradlew "$MODULE:assembleRelease" -Darch="${{ matrix.arch }}" --no-daemon --max-workers=2
+      - name: Build release APK
+        run: |
+          ./gradlew \
+            "$MODULE:assembleRelease" \
+            -Darch="${{ matrix.arch }}" \
+            --no-daemon \
+            --max-workers=2
 
-      - name: Verify APK metadata
+      - name: Verify APKs
         shell: bash
         run: |
           set -euo pipefail
@@ -136,10 +120,25 @@ jobs:
 
   publish:
     name: Publish GitHub Release
-    if: startsWith(github.ref, 'refs/tags/v')
     needs: build
+    if: ${{ needs.build.result == 'success' }}
     runs-on: ubuntu-latest
+
     steps:
+      - name: Determine release tag and number
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            RELEASE_TAG="${GITHUB_REF_NAME}"
+          else
+            RELEASE_TAG="v${VERSION_NAME}-r${GITHUB_RUN_NUMBER}"
+          fi
+
+          echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+          echo "release_number=$GITHUB_RUN_NUMBER" >> "$GITHUB_OUTPUT"
+
       - name: Download all matrix APKs
         uses: actions/download-artifact@v4
         with:
@@ -147,36 +146,55 @@ jobs:
           merge-multiple: true
           path: release-assets
 
-      - name: Show release assets
-        run: ls -lh release-assets
+      - name: Verify release set
+        shell: bash
+        run: |
+          set -euo pipefail
+          ls -lah release-assets
+          count=$(find release-assets -maxdepth 1 -type f -name '*.apk' | wc -l)
+          test "$count" -eq 5
+
+      - name: Generate release description
+        shell: bash
+        run: |
+          cat > release-body.md <<EOF
+          # LimonCher ${VERSION_NAME}
+
+          Modern, lightweight Minecraft Java Launcher for Android.
+
+          ## Application
+
+          - Developer: ${DEVELOPER}
+          - Package: \`${PACKAGE_NAME}\`
+          - Version: ${VERSION_NAME}
+          - Version Code: ${VERSION_CODE}
+          - Build: ${BUILD_NAME}
+          - Release: #${GITHUB_RUN_NUMBER}
+
+          ## Architectures
+
+          - ARM — \`armeabi-v7a\`
+          - ARM64 — \`arm64-v8a\`
+          - x86 — \`x86\`
+          - x86_64 — \`x86_64\`
+          - Universal — all supported ABIs
+
+          ## Authentication
+
+          Microsoft, Ely.by/Yggdrasil-compatible accounts, and offline profiles supported by the launcher.
+
+          ## Build
+
+          Built automatically by GitHub Actions.
+          EOF
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name }}
-          name: "LimonCher ${{ env.VERSION_NAME }} • ${{ github.ref_name }}"
+          tag_name: ${{ steps.release.outputs.tag }}
+          name: "LimonCher ${VERSION_NAME} • Release #${{ steps.release.outputs.release_number }}"
+          body_path: release-body.md
           generate_release_notes: true
           fail_on_unmatched_files: true
-          body: |
-            # LimonCher ${{ env.VERSION_NAME }}
-
-            Modern, lightweight Minecraft Java Launcher for Android.
-
-            **Developer:** ${{ env.DEVELOPER }}  
-            **Package:** `${{ env.PACKAGE_NAME }}`  
-            **Version Code:** `${{ env.VERSION_CODE }}`  
-            **Build:** `${{ env.BUILD_NAME }}`
-
-            ## Release architectures
-            - ARM — `armeabi-v7a`
-            - ARM64 — `arm64-v8a`
-            - x86 — `x86`
-            - x86_64 — `x86_64`
-            - Universal — all supported ABIs
-
-            ## Authentication
-            Microsoft, Ely.by/Yggdrasil-compatible accounts, and offline profiles supported by the launcher.
-
-            ## Build
-            Built automatically by GitHub Actions from the tagged source commit.
+          make_latest: true
           files: release-assets/*.apk

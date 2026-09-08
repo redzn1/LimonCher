@@ -25,15 +25,6 @@ val launcherVersionName = project.findProperty("launcher_version_name") as? Stri
 val defaultOAuthClientID = project.findProperty("oauth_client_id") as? String
 val defaultCurseForgeApiKey = project.findProperty("curseforge_api_key") as? String
 
-val releaseKeystoreFile = file("limoncher-release.jks")
-val releaseStorePassword = getKeyFromLocal("STORE_PASSWORD", ".store_password.txt")
-val releaseKeyPassword = getKeyFromLocal("KEY_PASSWORD", ".key_password.txt")
-val releaseKeyAlias = getKeyFromLocal("KEY_ALIAS", ".key_alias.txt", "limoncher")
-val releaseSigningReady = releaseKeystoreFile.isFile &&
-    releaseStorePassword.isNotBlank() &&
-    releaseKeyPassword.isNotBlank() &&
-    releaseKeyAlias.isNotBlank()
-
 val projectArch: String = System.getProperty("arch", "all")
 
 fun getKeyFromLocal(envKey: String, fileName: String? = null, default: String? = null): String {
@@ -49,36 +40,27 @@ fun getKeyFromLocal(envKey: String, fileName: String? = null, default: String? =
 
 android {
     namespace = launcherPackageName
-    compileSdk = 37
+    compileSdk = 35
 
-    signingConfigs {
-        create("releaseBuild") {
-            storeFile = releaseKeystoreFile
-            storePassword = releaseStorePassword
-            keyAlias = releaseKeyAlias
-            keyPassword = releaseKeyPassword
-        }
-    }
 
     defaultConfig {
         applicationId = launcherPackageName
         minSdk = 26
-        targetSdk = 34
+        targetSdk = 35
         versionCode = launcherVersionCode
         versionName = launcherVersionName
         manifestPlaceholders["launcher_name"] = launcherAPPName
-        buildConfigField("String", "LIMONCHER_BUILD", "\"024-AndroidVer-LimonCher\"")
+        buildConfigField("String", "LIMONCHER_BUILD", "\"038-AndroidVer-LimonCher\"")
     }
 
     buildTypes {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
-            if (releaseSigningReady) {
-                signingConfig = signingConfigs.getByName("releaseBuild")
-            } else {
-                logger.lifecycle("Release signing credentials not configured; producing an unsigned release APK.")
-            }
+            // Deliberately use Android's generated debug keystore so GitHub Releases
+            // require no private keystore or GitHub Secrets. Create a production
+            // signing key later if Play Store/update continuity is required.
+            signingConfig = signingConfigs.getByName("debug")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

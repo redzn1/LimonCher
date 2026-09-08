@@ -5,7 +5,7 @@ plugins {
 android {
     namespace = "com.movtery.inputmap"
     compileSdk {
-        version = release(37)
+        version = release(35)
     }
 
     defaultConfig {
