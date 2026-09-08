@@ -1,0 +1,258 @@
+name: Ubuntu 22.04 VPS - Bore
+
+on:
+  workflow_dispatch:
+
+jobs:
+  vps:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+
+    steps:
+      - name: Prepare Ubuntu 22.04 VPS
+        shell: bash
+        run: |
+          set -e
+
+          echo "======================================"
+          echo " Ubuntu 22.04 VPS"
+          echo " Hostname : limonep"
+          echo " Root     : root"
+          echo " Password : limonep"
+          echo "======================================"
+
+          sudo apt-get update
+          sudo apt-get install -y \
+            qemu-system-x86 \
+            qemu-utils \
+            wget \
+            curl \
+            unzip \
+            openssh-client \
+            genisoimage
+
+      - name: Download Ubuntu 22.04
+        shell: bash
+        run: |
+          set -e
+
+          mkdir -p "$HOME/vps"
+          cd "$HOME/vps"
+
+          wget -q --show-progress \
+            https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img \
+            -O ubuntu-22.04.img
+
+          qemu-img resize ubuntu-22.04.img 20G
+
+      - name: Create cloud-init configuration
+        shell: bash
+        run: |
+          set -e
+
+          cd "$HOME/vps"
+
+          cat > user-data <<'EOF'
+          #cloud-config
+
+          hostname: limonep
+          fqdn: limonep
+
+          manage_etc_hosts: true
+
+          users:
+            - name: root
+              lock_passwd: false
+              passwd: $6$rounds=4096$limonep$7yT3jY3zL4wX4R0N8Yf5mN6L4vK7Qw8mF9pJ2sX0Y7wZ8xG9bN2kC1dA6eR5tU4iP3oO2lK1jH0gF
+
+          chpasswd:
+            expire: false
+            list:
+              - root:limonep
+
+          ssh_pwauth: true
+
+          disable_root: false
+
+          packages:
+            - openssh-server
+            - sudo
+            - curl
+            - wget
+            - ca-certificates
+            - git
+            - nano
+            - htop
+            - unzip
+
+          runcmd:
+            - hostnamectl set-hostname limonep
+
+            - sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config
+            - sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
+
+            - systemctl enable ssh
+            - systemctl restart ssh
+
+            - echo "root:limonep" | chpasswd
+
+            - echo "================================"
+            - echo "LIMONEP VPS READY"
+            - echo "Hostname: limonep"
+            - echo "User: root"
+            - echo "Password: limonep"
+            - echo "================================"
+          EOF
+
+          cat > meta-data <<'EOF'
+          instance-id: limonep-vps
+          local-hostname: limonep
+          EOF
+
+          genisoimage \
+            -output seed.iso \
+            -volid cidata \
+            -joliet \
+            -rock \
+            user-data \
+            meta-data
+
+      - name: Start Ubuntu 22.04 VPS
+        shell: bash
+        run: |
+          set -e
+
+          cd "$HOME/vps"
+
+          qemu-system-x86_64 \
+            -enable-kvm \
+            -m 4096 \
+            -smp 2 \
+            -drive file=ubuntu-22.04.img,format=qcow2 \
+            -drive file=seed.iso,format=raw \
+            -netdev user,id=net0,hostfwd=tcp::2222-:22 \
+            -device virtio-net-pci,netdev=net0 \
+            -nographic \
+            > qemu.log 2>&1 &
+
+          echo $! > qemu.pid
+
+          echo "QEMU PID: $(cat qemu.pid)"
+
+      - name: Wait for SSH
+        shell: bash
+        run: |
+          echo "Waiting for Ubuntu..."
+
+          for i in {1..60}; do
+            if ssh \
+              -o StrictHostKeyChecking=no \
+              -o UserKnownHostsFile=/dev/null \
+              -o ConnectTimeout=2 \
+              -p 2222 \
+              root@127.0.0.1 \
+              "echo VPS_READY" 2>/dev/null; then
+
+              echo "Ubuntu 22.04 is ready!"
+              exit 0
+            fi
+
+            echo "Attempt $i/60..."
+            sleep 5
+          done
+
+          echo "Ubuntu failed to start."
+          cat "$HOME/vps/qemu.log" || true
+          exit 1
+
+      - name: Generate Bore Port
+        shell: bash
+        run: |
+          # 30000-39999
+          PORT=$(shuf -i 30000-39999 -n 1)
+
+          echo "BORE_PORT=$PORT" >> "$GITHUB_ENV"
+
+          echo "======================================"
+          echo "Bore port: $PORT"
+          echo "Format   : 3 + 4 digits"
+          echo "======================================"
+
+      - name: Install Bore
+        shell: bash
+        run: |
+          set -e
+
+          curl -L \
+            https://github.com/ekzhang/bore/releases/latest/download/bore-linux-amd64 \
+            -o bore
+
+          chmod +x bore
+          sudo mv bore /usr/local/bin/bore
+
+          bore --version || true
+
+      - name: Start Bore SSH Tunnel
+        shell: bash
+        run: |
+          set -e
+
+          echo "Starting Bore..."
+          echo "Target: 127.0.0.1:2222"
+          echo "Remote port: $BORE_PORT"
+
+          bore local 2222 \
+            --to bore.pub \
+            --port "$BORE_PORT" \
+            > bore.log 2>&1 &
+
+          echo $! > bore.pid
+
+          sleep 5
+
+          cat bore.log || true
+
+          echo
+          echo "======================================"
+          echo "         LIMONEP VPS ONLINE"
+          echo "======================================"
+          echo
+          echo "Hostname : limonep"
+          echo "Username : root"
+          echo "Password : limonep"
+          echo
+          echo "SSH:"
+          echo "ssh -p $BORE_PORT root@bore.pub"
+          echo
+          echo "Bore:"
+          echo "bore.pub:$BORE_PORT"
+          echo
+          echo "======================================"
+
+      - name: Keep VPS Alive
+        shell: bash
+        run: |
+          echo "======================================"
+          echo " LIMONEP VPS RUNNING"
+          echo "======================================"
+          echo "Hostname : limonep"
+          echo "OS       : Ubuntu 22.04"
+          echo "User     : root"
+          echo "Password : limonep"
+          echo "Bore     : bore.pub:$BORE_PORT"
+          echo "SSH      : ssh -p $BORE_PORT root@bore.pub"
+          echo "======================================"
+
+          while true; do
+            if ! kill -0 "$(cat "$HOME/vps/qemu.pid")" 2>/dev/null; then
+              echo "QEMU stopped."
+              exit 1
+            fi
+
+            if ! kill -0 "$(cat bore.pid)" 2>/dev/null; then
+              echo "Bore stopped."
+              exit 1
+            fi
+
+            sleep 30
+          done
