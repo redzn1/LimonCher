@@ -1,0 +1,129 @@
+name: LimonCher • Matrix Android Build
+
+on:
+  push:
+    branches: [ main, master ]
+    tags: [ 'v*' ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: limoncher-build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  JAVA_VERSION: '17'
+  MODULE: ':LimonCher'
+  VERSION_NAME: '0.2.4-AndroidVer'
+  VERSION_CODE: '24'
+
+jobs:
+  build:
+    name: Build ${{ matrix.arch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm
+            abi: armeabi-v7a
+            label: ARM (armeabi-v7a)
+          - arch: arm64
+            abi: arm64-v8a
+            label: ARM64 (arm64-v8a)
+          - arch: x86
+            abi: x86
+            label: x86
+          - arch: x86_64
+            abi: x86_64
+            label: x86_64
+          - arch: all
+            abi: all
+            label: Universal (all ABIs)
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Accept Android licenses
+        shell: bash
+        run: yes | sdkmanager --licenses >/dev/null || true
+
+      - name: Install Android build dependencies
+        shell: bash
+        run: |
+          sdkmanager "platform-tools" "platforms;android-37" "build-tools;35.0.0" "ndk;25.2.9519653"
+
+      - name: Make Gradle executable
+        run: chmod +x ./gradlew
+
+      - name: Build ${{ matrix.label }}
+        shell: bash
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          ./gradlew clean "$MODULE:assembleDebug" -Darch="$ARCH" --no-daemon --stacktrace
+
+      - name: Collect APK
+        shell: bash
+        run: |
+          mkdir -p artifacts
+          mapfile -t APKS < <(find LimonCher/build/outputs/apk/debug -maxdepth 1 -type f -name '*.apk' -print)
+          test "${#APKS[@]}" -gt 0
+          for apk in "${APKS[@]}"; do
+            cp "$apk" "artifacts/LimonCher-${VERSION_NAME}-${{ matrix.arch }}.apk"
+          done
+          printf 'Architecture: %s\nABI: %s\nVersion: %s\nVersion Code: %s\nPackage: com.limone.limoncher\nDeveloper: Limone Production X IsraaDev\n' \
+            '${{ matrix.arch }}' '${{ matrix.abi }}' "$VERSION_NAME" "$VERSION_CODE" > "artifacts/LimonCher-${VERSION_NAME}-${{ matrix.arch }}.txt"
+
+      - name: Upload CI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: LimonCher-${{ matrix.arch }}-${{ env.VERSION_NAME }}
+          path: artifacts/*
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: Publish GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download matrix artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: LimonCher-*-0.2.4-AndroidVer
+          merge-multiple: true
+          path: release-assets
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: LimonCher ${{ env.VERSION_NAME }} • ${{ github.ref_name }}
+          generate_release_notes: true
+          body: |
+            ## LimonCher ${{ env.VERSION_NAME }}
+
+            Minecraft Launcher — Limone Production X IsraaDev
+
+            - Package: `com.limone.limoncher`
+            - Version Code: `${{ env.VERSION_CODE }}`
+            - Build: `024-AndroidVer-LimonCher`
+            - Authentication: Microsoft, Ely.by/Yggdrasil, Offline
+            - Architectures: ARM, ARM64, x86, x86_64, Universal
+          files: release-assets/*
+          fail_on_unmatched_files: true
