@@ -1,0 +1,135 @@
+name: LimonCher Android Build
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  MODULE: ':LimonCher'
+  VERSION_NAME: '0.6.3-AndroidVer'
+  VERSION_CODE: '603'
+  PACKAGE_NAME: 'com.limone.limoncher'
+  DEVELOPER: 'Limone Production'
+
+jobs:
+  build:
+    name: Build ${{ matrix.label }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm
+            label: ARM
+          - arch: arm64
+            label: ARM64
+          - arch: x86
+            label: x86
+          - arch: x86_64
+            label: x86_64
+          - arch: all
+            label: Universal
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Accept Android SDK licenses
+        run: yes | sdkmanager --licenses >/dev/null 2>&1 || true
+
+      - name: Install Android SDK, build tools and NDK
+        run: |
+          set -euo pipefail
+          sdkmanager \
+            'platform-tools' \
+            'platforms;android-37' \
+            'build-tools;35.0.0' \
+            'ndk;25.2.9519653'
+
+      - name: Prepare Gradle
+        run: chmod +x ./gradlew
+
+      - name: Configure release signing
+        if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') }}
+        env:
+          KEYSTORE_B64: ${{ secrets.LIMONCHER_KEYSTORE_B64 }}
+          STORE_PASSWORD: ${{ secrets.LIMONCHER_STORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.LIMONCHER_KEY_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.LIMONCHER_KEY_ALIAS }}
+        run: |
+          set -euo pipefail
+          if [ -n "${KEYSTORE_B64:-}" ]; then
+            printf '%s' "$KEYSTORE_B64" | base64 --decode > LimonCher/limoncher-release.jks
+            printf '%s' "$STORE_PASSWORD" > .store_password.txt
+            printf '%s' "$KEY_PASSWORD" > .key_password.txt
+            printf '%s' "${KEY_ALIAS:-limoncher}" > .key_alias.txt
+          else
+            echo 'No release keystore secret configured; Gradle will fall back to debug signing.'
+          fi
+
+      - name: Build and test
+        run: |
+          ./gradlew --no-daemon --stacktrace test :LimonCher:assembleRelease -Parch=${{ matrix.arch }}
+
+      - name: Collect APK
+        run: |
+          mkdir -p dist
+          find LimonCher/build/outputs/apk -type f -name '*.apk' -exec cp {} dist/ \;
+          ls -lh dist
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: LimonCher-${{ env.VERSION_NAME }}-${{ matrix.arch }}
+          path: dist/*.apk
+          if-no-files-found: error
+
+      - name: Cleanup signing material
+        if: always()
+        run: rm -f LimonCher/limoncher-release.jks .store_password.txt .key_password.txt .key_alias.txt
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all APK artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          pattern: LimonCher-${{ env.VERSION_NAME }}-*
+          merge-multiple: true
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: release-assets/*.apk
+          name: LimonCher ${{ env.VERSION_NAME }}
+          body: |
+            ## LimonCher ${{ env.VERSION_NAME }}
+
+            **Developer:** ${{ env.DEVELOPER }}
+            **Package:** `${{ env.PACKAGE_NAME }}`
+            **Version code:** `${{ env.VERSION_CODE }}`
+
+            This release is an Android launcher build. Release notes containing `-lcto-` are treated by LimonCher as launcher-update releases.
