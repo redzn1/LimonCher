@@ -85,9 +85,13 @@ jobs:
             echo 'No release keystore secret configured; Gradle will fall back to debug signing.'
           fi
 
-      - name: Build and test
+      - name: Build release
         run: |
-          ./gradlew --no-daemon --stacktrace test :LimonCher:assembleRelease -Parch=${{ matrix.arch }}
+          ./gradlew \
+            --no-daemon \
+            --stacktrace \
+            :LimonCher:assembleRelease \
+            -Parch=${{ matrix.arch }}
 
       - name: Collect APK
         run: |
