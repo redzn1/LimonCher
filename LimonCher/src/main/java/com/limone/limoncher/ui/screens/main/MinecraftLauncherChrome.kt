@@ -2,6 +2,8 @@ package com.limone.limoncher.ui.screens.main
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -115,7 +117,7 @@ private fun MobileHeader(account: Account?, selectedTab: MinecraftTab, onAccount
             Spacer(Modifier.weight(1f))
             Profile(account, onAccounts, Modifier.widthIn(min = 120.dp, max = 170.dp).height(56.dp))
         }
-        Row(Modifier.fillMaxWidth().horizontalScroll(androidx.compose.foundation.rememberScrollState())) {
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
             listOf(MinecraftTab.PLAY to "Home", MinecraftTab.INSTALLATIONS to "Java Edition",
                 MinecraftTab.MODS to "Mods", MinecraftTab.PATCH_NOTES to "Patch Notes").forEach { (tab, label) ->
                 Text(label, color = if (selectedTab == tab) TextPrimary else TextSecondary,
