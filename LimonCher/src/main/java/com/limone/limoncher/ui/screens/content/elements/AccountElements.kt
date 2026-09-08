@@ -125,6 +125,7 @@ import com.limone.limoncher.game.account.getAccountTypeName
 import com.limone.limoncher.game.account.getUUIDFromUserName
 import com.limone.limoncher.game.account.isLocalAccount
 import com.limone.limoncher.game.account.isMicrosoftAccount
+import com.limone.limoncher.game.account.isAuthServerAccount
 import com.limone.limoncher.game.account.isSkinChangeAllowed
 import com.limone.limoncher.game.account.wardrobe.EmptyCape
 import com.limone.limoncher.game.account.wardrobe.SkinModelType

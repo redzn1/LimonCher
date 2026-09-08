@@ -148,7 +148,7 @@ private fun ProfileBlock(account: Account?, onClick: () -> Unit) {
                 fontFamily = FontFamily.SansSerif
             )
             Text(
-                text = account?.let(::getAccountTypeName) ?: "Offline / Microsoft / Ely.by",
+                text = account?.let { getAccountTypeName(it) } ?: "Offline / Microsoft / Ely.by",
                 color = McMuted,
                 maxLines = 1,
                 fontSize = 10.sp

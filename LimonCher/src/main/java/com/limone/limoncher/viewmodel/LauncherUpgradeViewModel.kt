@@ -241,7 +241,7 @@ class LauncherUpgradeViewModel: ViewModel() {
 
     private fun parseReleaseCode(tag: String): Int {
         val clean = tag.removePrefix("v")
-        return Regex("^(\d+)\.(\d+)\.(\d+)").find(clean)?.let { m ->
+        return Regex("^(\\d+)\\.(\\d+)\\.(\\d+)").find(clean)?.let { m ->
             m.groupValues[1].toInt() * 10_000 +
                 m.groupValues[2].toInt() * 100 +
                 m.groupValues[3].toInt()

@@ -77,6 +77,7 @@ import com.limone.limoncher.R
 import com.limone.limoncher.coroutine.Task
 import com.limone.limoncher.coroutine.TaskSystem
 import com.limone.limoncher.game.version.installed.Version
+import com.limone.limoncher.game.version.installed.VersionsManager
 import com.limone.limoncher.path.PathManager
 import com.limone.limoncher.setting.AllSettings
 import com.limone.limoncher.ui.AndroidStringText
