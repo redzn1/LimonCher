@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - "v*"
+
   workflow_dispatch:
     inputs:
       release_tag:
@@ -100,6 +101,7 @@ jobs:
 
           echo "JAVA_HOME=$JAVA_HOME"
           echo "ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT:-}"
+
           sdkmanager --list_installed | grep -E \
             'platform-tools|platforms;android-37|build-tools;35.0.0|ndk;25.2.9519653' || true
 
@@ -123,8 +125,7 @@ jobs:
             echo "Release signing: configured"
 
             printf '%s' "$KEYSTORE_B64" |
-              base64 --decode >
-              LimonCher/limoncher-release.jks
+              base64 --decode > LimonCher/limoncher-release.jks
 
             test -s LimonCher/limoncher-release.jks
 
@@ -147,10 +148,14 @@ jobs:
           fi
 
       - name: Make Gradle executable
+        shell: bash
         run: chmod +x ./gradlew
 
       - name: Build release APK
+        shell: bash
         run: |
+          set -euo pipefail
+
           ./gradlew \
             --no-daemon \
             --stacktrace \
@@ -165,6 +170,7 @@ jobs:
           set -euo pipefail
 
           shopt -s nullglob
+
           apks=(
             "${MODULE#:}/build/outputs/apk/release/"*.apk
           )
@@ -179,6 +185,7 @@ jobs:
           printf '%s\n' "${apks[@]}"
 
           apk="${apks[0]}"
+
           echo "path=$apk" >> "$GITHUB_OUTPUT"
 
       - name: Prepare release asset
@@ -224,8 +231,10 @@ jobs:
 
           if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
             RELEASE_TAG="${GITHUB_REF_NAME}"
+
           elif [[ -n "${INPUT_TAG}" ]]; then
             RELEASE_TAG="${INPUT_TAG}"
+
           else
             RELEASE_TAG="v${VERSION_NAME}"
           fi
@@ -247,12 +256,18 @@ jobs:
 
           echo "Release: ${RELEASE_TAG}"
           echo
-          echo "Assets:"
 
+          echo "Assets:"
           find release-assets -maxdepth 1 -type f -print | sort
           echo
 
-          apk_count="$(find release-assets -maxdepth 1 -type f -name '*.apk' | wc -l)"
+          apk_count="$(
+            find release-assets \
+              -maxdepth 1 \
+              -type f \
+              -name '*.apk' |
+              wc -l
+          )"
 
           if [[ "$apk_count" -ne 5 ]]; then
             echo "Expected 5 APKs, found ${apk_count}."
@@ -317,6 +332,7 @@ jobs:
 
           cat release-body.md
           echo
+
           echo "Checksums:"
           cat release-assets/SHA256SUMS.txt
 
